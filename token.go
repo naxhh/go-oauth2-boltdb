@@ -39,7 +39,7 @@ func NewTokenStore(config *Config) (oauth2.TokenStore, error) {
 	}
 
 	return &TokenStore{
-		db:            db,
+		Db:            db,
 		bucketName:    config.BucketName,
 		bucketTtlName: bucketTtlName,
 	}, nil
@@ -47,13 +47,9 @@ func NewTokenStore(config *Config) (oauth2.TokenStore, error) {
 
 // TokenStore token storage based on boltdb(https://github.com/boltdb/bolt)
 type TokenStore struct {
-	db            *bolt.DB
+	Db            *bolt.DB
 	bucketName    string
 	bucketTtlName string
-}
-
-func (ts *TokenStore) Close() {
-  ts.db.Close()
 }
 
 // Create creates and store the new token information
@@ -64,7 +60,7 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) error {
 		return err
 	}
 
-	return ts.db.Update(func(tx *bolt.Tx) error {
+	return ts.Db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(ts.bucketName))
 		//TODO: TTL bucket
 
@@ -101,7 +97,7 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) error {
 
 // remove key
 func (ts *TokenStore) remove(key string) error {
-	return ts.db.Update(func(tx *bolt.Tx) error {
+	return ts.Db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(ts.bucketName))
 		// TODO: TTL
 
@@ -128,7 +124,7 @@ func (ts *TokenStore) RemoveByRefresh(refresh string) error {
 func (ts *TokenStore) getData(key string) (oauth2.TokenInfo, error) {
 	var tm models.Token
 
-	err := ts.db.View(func(tx *bolt.Tx) error {
+	err := ts.Db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(ts.bucketName))
 
 		jv := bucket.Get([]byte(key))
@@ -146,7 +142,7 @@ func (ts *TokenStore) getData(key string) (oauth2.TokenInfo, error) {
 func (ts *TokenStore) getBasicID(key string) string {
 	var basicId []byte
 
-	ts.db.View(func(tx *bolt.Tx) error {
+	ts.Db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(ts.bucketName))
 
 		basicId = bucket.Get([]byte(key))
