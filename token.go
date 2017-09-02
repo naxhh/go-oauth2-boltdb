@@ -21,16 +21,17 @@ func NewTokenStore(config *Config) (oauth2.TokenStore, func(), error) {
 		return nil, nil, err
 	}
 
-	bucketTtlName := fmt.Sprintf("%s-ttl", config.BucketName)
+	bucketTtlName := []byte(fmt.Sprintf("%s-ttl", config.BucketName))
+	bucketName := []byte(config.BucketName)
 
 	err = db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(config.BucketName))
+		_, err := tx.CreateBucketIfNotExists(bucketName)
 
 		if err != nil {
 			return err
 		}
 
-		_, err = tx.CreateBucketIfNotExists([]byte(bucketTtlName))
+		_, err = tx.CreateBucketIfNotExists(bucketTtlName)
 
 		return err
 	})
@@ -41,14 +42,14 @@ func NewTokenStore(config *Config) (oauth2.TokenStore, func(), error) {
 
 	ts := &TokenStore{
 		db:            db,
-		bucketName:    config.BucketName,
+		bucketName:    bucketName,
 		bucketTtlName: bucketTtlName,
 	}
 
 	tsc := &TokenStoreCleaner{
 		db:            db,
 		quit:          make(chan struct{}),
-		bucketName:     config.BucketName,
+		bucketName:    bucketName,
 		bucketTtlName: bucketTtlName,
 	}
 
@@ -65,8 +66,8 @@ func NewTokenStore(config *Config) (oauth2.TokenStore, func(), error) {
 // TokenStore token storage based on boltdb(https://github.com/boltdb/bolt)
 type TokenStore struct {
 	db            *bolt.DB
-	bucketName    string
-	bucketTtlName string
+	bucketName    []byte
+	bucketTtlName []byte
 }
 
 // createTtl creates an entry on the TTL bucket.
@@ -85,8 +86,8 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) error {
 	}
 
 	return ts.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(ts.bucketName))
-		ttlBucket := tx.Bucket([]byte(ts.bucketTtlName))
+		bucket := tx.Bucket(ts.bucketName)
+		ttlBucket := tx.Bucket(ts.bucketTtlName)
 
 		if code := info.GetCode(); code != "" {
 			byteCode := []byte(code)
@@ -142,7 +143,7 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) error {
 // remove key
 func (ts *TokenStore) remove(key string) error {
 	return ts.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(ts.bucketName))
+		bucket := tx.Bucket(ts.bucketName)
 		// TODO: TTL
 
 		return bucket.Delete([]byte(key))
@@ -168,7 +169,7 @@ func (ts *TokenStore) getData(key string) (oauth2.TokenInfo, error) {
 	var tm models.Token
 
 	err := ts.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(ts.bucketName))
+		bucket := tx.Bucket(ts.bucketName)
 
 		jv := bucket.Get([]byte(key))
 
@@ -186,7 +187,7 @@ func (ts *TokenStore) getBasicID(key string) string {
 	var basicId []byte
 
 	ts.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(ts.bucketName))
+		bucket := tx.Bucket(ts.bucketName)
 
 		basicId = bucket.Get([]byte(key))
 		return nil
@@ -216,8 +217,8 @@ func (ts *TokenStore) GetByRefresh(refresh string) (oauth2.TokenInfo, error) {
 type TokenStoreCleaner struct {
 	db            *bolt.DB
 	quit          chan struct{}
-	bucketName    string
-	bucketTtlName string
+	bucketName    []byte
+	bucketTtlName []byte
 }
 
 // monitor is the start method and will create a monitor that will sweep every minute
@@ -255,8 +256,8 @@ func (tsc *TokenStoreCleaner) sweep() error {
 	}
 
 	return tsc.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(tsc.bucketName))
-		ttlBucket := tx.Bucket([]byte(tsc.bucketTtlName))
+		bucket := tx.Bucket(tsc.bucketName)
+		ttlBucket := tx.Bucket(tsc.bucketTtlName)
 
 		for _, key := range keys {
 			bucket.Delete(key)
@@ -275,7 +276,7 @@ func (tsc *TokenStoreCleaner) getExpired() ([][]byte, [][]byte, error) {
 	ttlKeys := [][]byte{}
 
 	err := tsc.db.View(func(tx *bolt.Tx) error {
-		c := tx.Bucket([]byte(tsc.bucketTtlName)).Cursor()
+		c := tx.Bucket(tsc.bucketTtlName).Cursor()
 
 		max := []byte(time.Now().UTC().Format(time.RFC3339Nano))
 
