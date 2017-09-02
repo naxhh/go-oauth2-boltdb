@@ -13,11 +13,11 @@ import (
 )
 
 // NewTokenStore creates a token store based on boltdb
-func NewTokenStore(config *Config) (oauth2.TokenStore, error) {
+func NewTokenStore(config *Config) (oauth2.TokenStore, *bolt.DB, error) {
 	db, err := bolt.Open(config.DbName, 0600, nil)
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	bucketTtlName := fmt.Sprintf("%s-ttl", config.BucketName)
@@ -35,14 +35,14 @@ func NewTokenStore(config *Config) (oauth2.TokenStore, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	return &TokenStore{
 		db:            db,
 		bucketName:    config.BucketName,
 		bucketTtlName: bucketTtlName,
-	}, nil
+	}, db, nil
 }
 
 // TokenStore token storage based on boltdb(https://github.com/boltdb/bolt)
@@ -53,7 +53,7 @@ type TokenStore struct {
 }
 
 func (ts *TokenStore) Close() {
-  ts.db.Close()
+	ts.db.Close()
 }
 
 // Create creates and store the new token information
