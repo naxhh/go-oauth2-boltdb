@@ -3,7 +3,6 @@ package boltdb
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -55,7 +54,6 @@ type TokenStore struct {
 
 // Create creates and store the new token information
 func (ts *TokenStore) Create(info oauth2.TokenInfo) error {
-	log.Println(info)
 	ct := time.Now()
 	jv, err := json.Marshal(info)
 	if err != nil {
@@ -82,18 +80,21 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) error {
 				aexp = rexp
 			}
 
-			err := bucket.Put(basicID, jv)
+			err := bucket.Put([]byte(refresh), basicID)
 			// TODO: TTL
 
 			if err != nil {
-				return err
+				return nil
 			}
-
-			return bucket.Put([]byte(info.GetAccess()), basicID)
-			// TODO: TTL
 		}
 
-		return nil
+		err := bucket.Put(basicID, jv) // TODO: TTL
+
+		if err != nil {
+			return nil
+		}
+
+		return bucket.Put([]byte(info.GetAccess()), basicID) // TODO: TTL
 	})
 }
 
