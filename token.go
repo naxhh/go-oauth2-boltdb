@@ -52,6 +52,13 @@ type TokenStore struct {
 	bucketTtlName string
 }
 
+// createTtl creates an entry on the TTL bucket.
+func createTtl(bucket *bolt.Bucket, key []byte, ttl time.Duration) error {
+	expirationTime := time.Now().Add(ttl).UTC().Format(time.RFC3339Nano)
+
+	return bucket.Put([]byte(expirationTime), key)
+}
+
 // Create creates and store the new token information
 func (ts *TokenStore) Create(info oauth2.TokenInfo) error {
 	ct := time.Now()
@@ -62,15 +69,20 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) error {
 
 	return ts.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(ts.bucketName))
-		//TODO: TTL bucket
+		ttlBucket := tx.Bucket([]byte(ts.bucketTtlName))
 
 		if code := info.GetCode(); code != "" {
-			return bucket.Put([]byte(code), jv) // TODO: code to byte?
-			// TODO: TTL!
+			byteCode := []byte(code)
+			err := bucket.Put(byteCode, jv)
+
+			if err != nil {
+				return err
+			}
+
+			return createTtl(ttlBucket, byteCode, info.GetCodeExpiresIn())
 		}
 
 		basicID := uuid.NewV4().Bytes()
-		// TODO: This ttls are in seconds but we will need to save the time WHEN they expire.. (ttl + ct)
 		aexp := info.GetAccessExpiresIn()
 		rexp := aexp
 
@@ -80,21 +92,33 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) error {
 				aexp = rexp
 			}
 
-			err := bucket.Put([]byte(refresh), basicID)
-			// TODO: TTL
-
+			byteRefresh := []byte(refresh)
+			err := bucket.Put(byteRefresh, basicID)
 			if err != nil {
 				return nil
 			}
+
+			return createTtl(ttlBucket, byteRefresh, rexp)
 		}
 
-		err := bucket.Put(basicID, jv) // TODO: TTL
-
+		err := bucket.Put(basicID, jv)
 		if err != nil {
 			return nil
 		}
 
-		return bucket.Put([]byte(info.GetAccess()), basicID) // TODO: TTL
+		err = createTtl(ttlBucket, basicID, rexp)
+		if err != nil {
+			return nil
+		}
+
+		byteAccess := []byte(info.GetAccess())
+
+		err = bucket.Put(byteAccess, basicID)
+		if err != nil {
+			return nil
+		}
+
+		return createTtl(ttlBucket, byteAccess, aexp)
 	})
 }
 
@@ -104,7 +128,6 @@ func (ts *TokenStore) remove(key string) error {
 		bucket := tx.Bucket([]byte(ts.bucketName))
 		// TODO: TTL
 
-		// TODO: key to byte?
 		return bucket.Delete([]byte(key))
 	})
 }
