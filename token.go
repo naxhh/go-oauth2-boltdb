@@ -1,6 +1,7 @@
 package boltdb
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -13,7 +14,7 @@ import (
 )
 
 // NewTokenStore creates a token store based on boltdb
-func NewTokenStore(config *Config) (oauth2.TokenStore, *bolt.DB, error) {
+func NewTokenStore(config *Config) (oauth2.TokenStore, func(), error) {
 	db, err := bolt.Open(config.DbName, 0600, nil)
 
 	if err != nil {
@@ -38,11 +39,27 @@ func NewTokenStore(config *Config) (oauth2.TokenStore, *bolt.DB, error) {
 		return nil, nil, err
 	}
 
-	return &TokenStore{
+	ts := &TokenStore{
 		db:            db,
 		bucketName:    config.BucketName,
 		bucketTtlName: bucketTtlName,
-	}, db, nil
+	}
+
+	tsc := &TokenStoreCleaner{
+		db:            db,
+		quit:          make(chan struct{}),
+		bucketName:     config.BucketName,
+		bucketTtlName: bucketTtlName,
+	}
+
+	tsc.monitor()
+
+	closeFunction := func() {
+		tsc.close()
+		db.Close()
+	}
+
+	return ts, closeFunction, nil
 }
 
 // TokenStore token storage based on boltdb(https://github.com/boltdb/bolt)
@@ -193,4 +210,82 @@ func (ts *TokenStore) GetByAccess(access string) (oauth2.TokenInfo, error) {
 func (ts *TokenStore) GetByRefresh(refresh string) (oauth2.TokenInfo, error) {
 	basicID := ts.getBasicID(refresh)
 	return ts.getData(basicID)
+}
+
+// TokenStoreCleaner is in charge of cleaning keys with expired ttl
+type TokenStoreCleaner struct {
+	db            *bolt.DB
+	quit          chan struct{}
+	bucketName    string
+	bucketTtlName string
+}
+
+// monitor is the start method and will create a monitor that will sweep every minute
+func (tsc *TokenStoreCleaner) monitor() {
+	ticker := time.NewTicker(1 * time.Minute)
+
+	go tsc.dispatcher(ticker)
+}
+
+// close is the close method for the monitor
+func (tsc *TokenStoreCleaner) close() {
+	tsc.quit <- struct{}{}
+}
+
+// dispatcher will receive close or tick calls and perform the required actions
+func (tsc *TokenStoreCleaner) dispatcher(ticker *time.Ticker) {
+	for {
+		select {
+		case <-ticker.C:
+			tsc.sweep()
+
+		case <-tsc.quit:
+			ticker.Stop()
+			return
+		}
+	}
+}
+
+// sweep scans the ttl bucket searching for expired keys
+func (tsc *TokenStoreCleaner) sweep() error {
+	keys, ttlKeys, err := tsc.getExpired()
+
+	if err != nil || len(keys) == 0 {
+		return nil
+	}
+
+	return tsc.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tsc.bucketName))
+		ttlBucket := tx.Bucket([]byte(tsc.bucketTtlName))
+
+		for _, key := range keys {
+			bucket.Delete(key)
+		}
+
+		for _, key := range ttlKeys {
+			ttlBucket.Delete(key)
+		}
+
+		return nil
+	})
+}
+
+func (tsc *TokenStoreCleaner) getExpired() ([][]byte, [][]byte, error) {
+	keys := [][]byte{}
+	ttlKeys := [][]byte{}
+
+	err := tsc.db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket([]byte(tsc.bucketTtlName)).Cursor()
+
+		max := []byte(time.Now().UTC().Format(time.RFC3339Nano))
+
+		for k, v := c.First(); k != nil && bytes.Compare(k, max) <= 0; k, v = c.Next() {
+			keys = append(keys, v)
+			ttlKeys = append(ttlKeys, k)
+		}
+
+		return nil
+	})
+
+	return keys, ttlKeys, err
 }
