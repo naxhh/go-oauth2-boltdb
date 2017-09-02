@@ -52,6 +52,10 @@ type TokenStore struct {
 	bucketTtlName string
 }
 
+func (ts *TokenStore) Close() {
+  ts.db.Close()
+}
+
 // Create creates and store the new token information
 func (ts *TokenStore) Create(info oauth2.TokenInfo) error {
 	ct := time.Now()
