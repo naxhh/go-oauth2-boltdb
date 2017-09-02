@@ -223,7 +223,7 @@ type TokenStoreCleaner struct {
 
 // monitor is the start method and will create a monitor that will sweep every minute
 func (tsc *TokenStoreCleaner) monitor() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(30 * time.Second)
 
 	go tsc.dispatcher(ticker)
 }
